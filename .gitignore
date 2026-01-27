@@ -17,10 +17,9 @@ node_modules/
 .env
 uploads/
 *.log
-firebase-service-account.json
-*.json
-dev.db
 spotapp-*.json
+firebase-service-account.json
+dev.db
 
 # Uploads (dev only)
 uploads/

@@ -6,11 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { authenticate } from '../middleware/auth.middleware.js';
 import { AppError, asyncHandler } from '../middleware/error.middleware.js';
 import prisma from '../lib/prisma.js';
-import fluentFfmpeg from 'fluent-ffmpeg';
-import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 
-// Configure ffmpeg path
-fluentFfmpeg.setFfmpegPath(ffmpegInstaller.path);
 
 const router = Router();
 
@@ -67,33 +63,6 @@ const upload = multer({
     }
 });
 
-// Generate thumbnail for video
-const generateThumbnail = (videoPath, filename) => {
-    return new Promise((resolve, reject) => {
-        const thumbnailDir = path.join(process.env.UPLOAD_DIR || './uploads', 'thumbnails');
-        if (!fs.existsSync(thumbnailDir)) {
-            fs.mkdirSync(thumbnailDir, { recursive: true });
-        }
-
-        const thumbnailFilename = `thumb-${filename}.jpg`;
-        const thumbnailPath = path.join(thumbnailDir, thumbnailFilename);
-
-        fluentFfmpeg(videoPath)
-            .screenshots({
-                count: 1,
-                folder: thumbnailDir,
-                filename: thumbnailFilename,
-                size: '320x240'
-            })
-            .on('end', () => {
-                resolve(`/uploads/thumbnails/${thumbnailFilename}`);
-            })
-            .on('error', (err) => {
-                console.error('Error generating thumbnail:', err);
-                resolve(null); // Return null if thumbnail generation fails, don't crash
-            });
-    });
-};
 
 // Upload multiple files (incident media)
 router.post('/media', authenticate, upload.array('media', 5), asyncHandler(async (req, res) => {
@@ -111,11 +80,10 @@ router.post('/media', authenticate, upload.array('media', 5), asyncHandler(async
         if (file.mimetype.startsWith('video/')) {
             type = 'VIDEO';
             url = `/uploads/videos/${file.filename}`;
-            // Generate thumbnail
-            thumbnail = await generateThumbnail(file.path, path.parse(file.filename).name);
+            thumbnail = url; // Use video URL as thumbnail (mobile app can show first frame)
         } else {
             url = `/uploads/images/${file.filename}`;
-            thumbnail = url; // Use original image as thumbnail for now (could optimize later)
+            thumbnail = url;
         }
 
         return prisma.incidentMedia.create({
