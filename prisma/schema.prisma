@@ -1,0 +1,264 @@
+// Prisma Schema for The Spot Samachar
+// SQLite for development, PostgreSQL for production
+// Note: SQLite does not support enums, so we use String with validation in code
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USER MANAGEMENT
+// ============================================
+
+model User {
+  id              String    @id @default(uuid())
+  phone           String?   @unique  // Optional for admin/police (can login with email)
+  email           String?   @unique
+  password        String
+  name            String
+  avatar          String?
+  role            String    @default("CITIZEN") // CITIZEN, VERIFIED_REPORTER, MODERATOR, ADMIN, POLICE
+  isVerified      Boolean   @default(false)
+  isActive        Boolean   @default(true)
+  credibilityScore Int      @default(50)
+  
+  // Profile details
+  bio             String?
+  address         String?
+  city            String?
+  state           String?
+  pincode         String?
+  
+  // Police station link (for POLICE role)
+  policeStationId String?
+  policeStation   PoliceStation?  @relation("StationOfficers", fields: [policeStationId], references: [id])
+  
+  // Verification documents
+  idProofType     String?
+  idProofNumber   String?
+  idProofImage    String?
+  verifiedAt      DateTime?
+  verifiedBy      String?
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  lastLoginAt     DateTime?
+  
+  // Relations
+  incidents       Incident[]
+  refreshTokens   RefreshToken[]
+  notifications   Notification[]
+  reports         Report[]        @relation("ReportedBy")
+  reviewedReports Report[]        @relation("ReviewedBy")
+  auditLogs       AuditLog[]
+  
+  @@map("users")
+}
+
+model RefreshToken {
+  id          String   @id @default(uuid())
+  token       String   @unique
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  
+  @@map("refresh_tokens")
+}
+
+// ============================================
+// INCIDENT MANAGEMENT
+// ============================================
+
+model Incident {
+  id              String   @id @default(uuid())
+  title           String
+  description     String
+  category        String   // ACCIDENT, CRIME, FIRE, etc.
+  
+  // Location data
+  latitude        Float
+  longitude       Float
+  address         String?
+  city            String?
+  state           String?
+  pincode         String?
+  
+  // Nearest police station
+  policeStationId String?
+  policeStation   PoliceStation?  @relation(fields: [policeStationId], references: [id])
+  
+  // Status and verification
+  status          String   @default("SUBMITTED") // DRAFT, SUBMITTED, UNDER_REVIEW, VERIFIED, REJECTED, TAKEN_DOWN
+  verificationNote String?
+  verifiedAt      DateTime?
+  verifiedBy      String?
+  
+  // Publisher
+  publisherId     String
+  publisher       User     @relation(fields: [publisherId], references: [id], onDelete: Cascade)
+  publisherBadge  String   // User role at time of posting
+  
+  // Engagement
+  viewCount       Int      @default(0)
+  shareCount      Int      @default(0)
+  
+  // Timestamps
+  incidentTime    DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  media           IncidentMedia[]
+  reports         Report[]
+  
+  @@index([status])
+  @@index([category])
+  @@index([createdAt])
+  @@map("incidents")
+}
+
+model IncidentMedia {
+  id          String    @id @default(uuid())
+  incidentId  String?
+  incident    Incident? @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  type        String    // IMAGE, VIDEO
+  url         String
+  thumbnail   String?
+  duration    Int?      // For videos, in seconds
+  size        Int       // In bytes
+  mimeType    String
+  
+  // Metadata
+  capturedAt  DateTime  @default(now())
+  latitude    Float?
+  longitude   Float?
+  
+  createdAt   DateTime  @default(now())
+  
+  @@map("incident_media")
+}
+
+// ============================================
+// POLICE STATION DATA
+// ============================================
+
+model PoliceStation {
+  id          String     @id @default(uuid())
+  name        String
+  stationType String     @default("SUB_STATION") // HQ, SUB_STATION, SPECIALIZED
+  address     String
+  city        String
+  state       String
+  pincode     String
+  phone       String?
+  email       String?
+  
+  latitude    Float
+  longitude   Float
+  
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  
+  // Relations
+  incidents   Incident[]
+  officers    User[]     @relation("StationOfficers")
+  
+  @@map("police_stations")
+}
+
+// ============================================
+// AUDIT LOGS (Admin Actions)
+// ============================================
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  adminId     String
+  admin       User     @relation(fields: [adminId], references: [id])
+  
+  action      String   // VERIFY_INCIDENT, REJECT_INCIDENT, SUSPEND_USER, CREATE_POLICE_USER, etc.
+  targetType  String   // INCIDENT, USER, POLICE_STATION
+  targetId    String
+  
+  details     String?  // JSON string with additional data
+  reason      String?  // Reason for rejection, suspension, etc.
+  
+  ipAddress   String?
+  userAgent   String?
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([adminId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================
+// REPORTING & MODERATION
+// ============================================
+
+model Report {
+  id          String   @id @default(uuid())
+  incidentId  String
+  incident    Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  
+  reporterId  String
+  reporter    User     @relation("ReportedBy", fields: [reporterId], references: [id], onDelete: Cascade)
+  
+  reason      String   // FAKE_NEWS, INAPPROPRIATE, VIOLENCE, etc.
+  description String?
+  
+  status      String   @default("PENDING") // PENDING, REVIEWED, ACTION_TAKEN, DISMISSED
+  reviewedById String?
+  reviewedBy  User?    @relation("ReviewedBy", fields: [reviewedById], references: [id])
+  reviewNote  String?
+  reviewedAt  DateTime?
+  
+  createdAt   DateTime @default(now())
+  
+  @@map("reports")
+}
+
+// ============================================
+// NOTIFICATIONS
+// ============================================
+
+model Notification {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  type        String   // INCIDENT_VERIFIED, INCIDENT_REJECTED, etc.
+  title       String
+  message     String
+  data        String?  // JSON string for additional data
+  
+  isRead      Boolean  @default(false)
+  readAt      DateTime?
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+// ============================================
+// DAILY POSTING TRACKER
+// ============================================
+
+model DailyPostTracker {
+  id          String   @id @default(uuid())
+  userId      String
+  date        DateTime @default(now())
+  postCount   Int      @default(0)
+  
+  @@unique([userId, date])
+  @@map("daily_post_tracker")
+}
