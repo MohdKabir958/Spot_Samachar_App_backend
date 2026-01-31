@@ -39,13 +39,13 @@ router.post('/send-otp', asyncHandler(async (req, res) => {
     const otp = generateOTP();
     storeOTP(email, otp);
 
-    // Send OTP email
-    const result = await sendOTPEmail(email, otp);
+    // Send OTP email asynchronously (don't wait for it)
+    // This prevents delays from email service issues
+    sendOTPEmail(email, otp).catch(error => {
+        console.error('Failed to send OTP email (async):', error);
+    });
 
-    if (!result.success) {
-        throw new AppError('Failed to send OTP email', 500);
-    }
-
+    // Respond immediately
     res.json({
         success: true,
         message: 'OTP sent to your email',
@@ -107,8 +107,10 @@ router.post('/verify-otp', asyncHandler(async (req, res) => {
             },
         });
 
-        // Send welcome email
-        await sendWelcomeEmail(email, name);
+        // Send welcome email asynchronously
+        sendWelcomeEmail(email, name).catch(error => {
+            console.error('Failed to send welcome email (async):', error);
+        });
     }
 
     if (!user.isActive) {
